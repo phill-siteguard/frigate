@@ -1,6 +1,6 @@
 import os
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import Field, PrivateAttr
 
@@ -51,6 +51,14 @@ class CameraTypeEnum(str, Enum):
 class CameraConfig(FrigateBaseModel):
     name: Optional[str] = Field(None, title="Camera name.", pattern=REGEX_CAMERA_NAME)
     enabled: bool = Field(default=True, title="Enable camera.")
+
+    # Custom metadata for this camera. This field allows arbitrary key/value
+    # pairs to be stored in the configuration, such as camera serial
+    # numbers or installation information. Values must be JSON-serializable.
+    meta: dict[str, Any] = Field(
+        default_factory=dict,
+        title="Custom metadata for the camera. Keys and values are arbitrary.",
+    )
 
     # Options with global fallback
     audio: AudioConfig = Field(

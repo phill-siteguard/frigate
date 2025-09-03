@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional
 
@@ -91,6 +92,49 @@ def create_fastapi_app(
         # After request https://stackoverflow.com/a/75487519
         if not database.is_closed():
             database.close()
+        return response
+
+    # Middleware that injects camera metadata into all JSON responses
+    @app.middleware("http")
+    async def camera_meta_middleware(request: Request, call_next):
+        response = await call_next(request)
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("application/json"):
+            try:
+                body_bytes = response.body
+            except Exception:
+                body_bytes = None
+            if body_bytes:
+                try:
+                    data = json.loads(body_bytes)
+                except Exception:
+                    return response
+
+                def inject_meta(obj):
+                    if isinstance(obj, dict):
+                        if "camera" in obj and "camera_meta" not in obj:
+                            camera_name = obj.get("camera")
+                            meta = {}
+                            try:
+                                camera_config = request.app.frigate_config.cameras.get(
+                                    camera_name
+                                )
+                                if (
+                                    camera_config is not None
+                                    and getattr(camera_config, "meta", None) is not None
+                                ):
+                                    meta = camera_config.meta or {}
+                            except Exception:
+                                meta = {}
+                            obj["camera_meta"] = meta
+                        for val in obj.values():
+                            inject_meta(val)
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            inject_meta(item)
+
+                inject_meta(data)
+                return JSONResponse(content=data, status_code=response.status_code)
         return response
 
     @app.on_event("startup")
