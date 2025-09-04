@@ -99,43 +99,77 @@ def create_fastapi_app(
     async def camera_meta_middleware(request: Request, call_next):
         response = await call_next(request)
         content_type = response.headers.get("content-type", "")
-        if content_type.startswith("application/json"):
-            try:
-                body_bytes = response.body
-            except Exception:
-                body_bytes = None
-            if body_bytes:
-                try:
-                    data = json.loads(body_bytes)
-                except Exception:
-                    return response
+        if not content_type.startswith("application/json"):
+            logger.debug(
+                "Camera meta not injected because content-type is '%s'",
+                content_type,
+            )
+            return response
 
-                def inject_meta(obj):
-                    if isinstance(obj, dict):
-                        if "camera" in obj and "camera_meta" not in obj:
-                            camera_name = obj.get("camera")
+        try:
+            body_bytes = response.body
+        except Exception as err:
+            logger.debug(
+                "Camera meta not injected because response body could not be accessed: %s",
+                err,
+            )
+            body_bytes = None
+
+        if not body_bytes:
+            logger.debug("Camera meta not injected because response body is empty")
+            return response
+
+        try:
+            data = json.loads(body_bytes)
+        except Exception as err:
+            logger.debug(
+                "Camera meta not injected because response body is not valid JSON: %s",
+                err,
+            )
+            return response
+
+        injected = False
+        found_camera = False
+
+        def inject_meta(obj):
+            nonlocal injected, found_camera
+            if isinstance(obj, dict):
+                if "camera" in obj:
+                    found_camera = True
+                    if "camera_meta" not in obj:
+                        camera_name = obj.get("camera")
+                        meta = {}
+                        try:
+                            camera_config = request.app.frigate_config.cameras.get(
+                                camera_name
+                            )
+                            if (
+                                camera_config is not None
+                                and getattr(camera_config, "meta", None) is not None
+                            ):
+                                meta = camera_config.meta or {}
+                        except Exception:
                             meta = {}
-                            try:
-                                camera_config = request.app.frigate_config.cameras.get(
-                                    camera_name
-                                )
-                                if (
-                                    camera_config is not None
-                                    and getattr(camera_config, "meta", None) is not None
-                                ):
-                                    meta = camera_config.meta or {}
-                            except Exception:
-                                meta = {}
-                            obj["camera_meta"] = meta
-                        for val in obj.values():
-                            inject_meta(val)
-                    elif isinstance(obj, list):
-                        for item in obj:
-                            inject_meta(item)
+                        obj["camera_meta"] = meta
+                        injected = True
+                for val in obj.values():
+                    inject_meta(val)
+            elif isinstance(obj, list):
+                for item in obj:
+                    inject_meta(item)
 
-                inject_meta(data)
-                return JSONResponse(content=data, status_code=response.status_code)
-        return response
+        inject_meta(data)
+        if not injected:
+            if found_camera:
+                logger.debug(
+                    "Camera meta not injected because camera_meta already present",
+                )
+            else:
+                logger.debug(
+                    "Camera meta not injected because no camera field found in response",
+                )
+
+        return JSONResponse(content=data, status_code=response.status_code)
 
     @app.on_event("startup")
     async def startup():
