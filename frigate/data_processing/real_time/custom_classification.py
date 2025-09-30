@@ -3,7 +3,7 @@
 import datetime
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -27,12 +27,19 @@ from frigate.util.object import box_overlaps, calculate_region
 from ..types import DataProcessorMetrics
 from .api import RealTimeProcessorApi
 
+logger = logging.getLogger(__name__)
+
 try:
     from tflite_runtime.interpreter import Interpreter
 except ModuleNotFoundError:
-    from tensorflow.lite.python.interpreter import Interpreter
-
-logger = logging.getLogger(__name__)
+    try:
+        from tensorflow.lite.python.interpreter import Interpreter
+    except ModuleNotFoundError:
+        Interpreter = None  # type: ignore[assignment]
+        logger.warning(
+            "Custom classification disabled because tflite_runtime and "
+            "TensorFlow Lite dependencies are unavailable."
+        )
 
 
 class CustomStateClassificationProcessor(RealTimeProcessorApi):
@@ -48,7 +55,7 @@ class CustomStateClassificationProcessor(RealTimeProcessorApi):
         self.requestor = requestor
         self.model_dir = os.path.join(MODEL_CACHE_DIR, self.model_config.name)
         self.train_dir = os.path.join(CLIPS_DIR, self.model_config.name, "train")
-        self.interpreter: Interpreter = None
+        self.interpreter: Optional[Any] = None
         self.tensor_input_details: dict[str, Any] = None
         self.tensor_output_details: dict[str, Any] = None
         self.labelmap: dict[int, str] = {}
@@ -57,10 +64,16 @@ class CustomStateClassificationProcessor(RealTimeProcessorApi):
             self.metrics.classification_speeds[self.model_config.name]
         )
         self.last_run = datetime.datetime.now().timestamp()
+        if Interpreter is None:
+            return
+
         self.__build_detector()
 
     @redirect_output_to_logger(logger, logging.DEBUG)
     def __build_detector(self) -> None:
+        if Interpreter is None:
+            return
+
         self.interpreter = Interpreter(
             model_path=os.path.join(self.model_dir, "model.tflite"),
             num_threads=2,
@@ -136,6 +149,9 @@ class CustomStateClassificationProcessor(RealTimeProcessorApi):
         if frame.shape != (224, 224):
             frame = cv2.resize(frame, (224, 224))
 
+        if self.interpreter is None:
+            return
+
         input = np.expand_dims(frame, axis=0)
         self.interpreter.set_tensor(self.tensor_input_details[0]["index"], input)
         self.interpreter.invoke()
@@ -164,6 +180,12 @@ class CustomStateClassificationProcessor(RealTimeProcessorApi):
     def handle_request(self, topic, request_data):
         if topic == EmbeddingsRequestEnum.reload_classification_model.value:
             if request_data.get("model_name") == self.model_config.name:
+                if Interpreter is None:
+                    return {
+                        "success": False,
+                        "message": "Classification dependencies are not available.",
+                    }
+
                 self.__build_detector()
                 logger.info(
                     f"Successfully loaded updated model for {self.model_config.name}"
@@ -193,7 +215,7 @@ class CustomObjectClassificationProcessor(RealTimeProcessorApi):
         self.model_config = model_config
         self.model_dir = os.path.join(MODEL_CACHE_DIR, self.model_config.name)
         self.train_dir = os.path.join(CLIPS_DIR, self.model_config.name, "train")
-        self.interpreter: Interpreter = None
+        self.interpreter: Optional[Any] = None
         self.sub_label_publisher = sub_label_publisher
         self.tensor_input_details: dict[str, Any] = None
         self.tensor_output_details: dict[str, Any] = None
@@ -203,10 +225,16 @@ class CustomObjectClassificationProcessor(RealTimeProcessorApi):
         self.inference_speed = InferenceSpeed(
             self.metrics.classification_speeds[self.model_config.name]
         )
+        if Interpreter is None:
+            return
+
         self.__build_detector()
 
     @redirect_output_to_logger(logger, logging.DEBUG)
     def __build_detector(self) -> None:
+        if Interpreter is None:
+            return
+
         self.interpreter = Interpreter(
             model_path=os.path.join(self.model_dir, "model.tflite"),
             num_threads=2,
@@ -256,6 +284,9 @@ class CustomObjectClassificationProcessor(RealTimeProcessorApi):
 
         if crop.shape != (224, 224):
             crop = cv2.resize(crop, (224, 224))
+
+        if self.interpreter is None:
+            return
 
         input = np.expand_dims(crop, axis=0)
         self.interpreter.set_tensor(self.tensor_input_details[0]["index"], input)
@@ -309,6 +340,12 @@ class CustomObjectClassificationProcessor(RealTimeProcessorApi):
     def handle_request(self, topic, request_data):
         if topic == EmbeddingsRequestEnum.reload_classification_model.value:
             if request_data.get("model_name") == self.model_config.name:
+                if Interpreter is None:
+                    return {
+                        "success": False,
+                        "message": "Classification dependencies are not available.",
+                    }
+
                 logger.info(
                     f"Successfully loaded updated model for {self.model_config.name}"
                 )

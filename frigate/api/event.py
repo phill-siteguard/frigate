@@ -8,6 +8,7 @@ import random
 import string
 from functools import reduce
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 import cv2
@@ -60,8 +61,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=[Tags.events])
 
 
+def _attach_camera_meta(event: dict[str, Any], camera_configs: dict[str, Any]) -> dict[str, Any]:
+    camera_name = event.get("camera")
+    camera_config = camera_configs.get(camera_name) if camera_name else None
+
+    if camera_config is None:
+        event["camera_meta"] = None
+        return event
+
+    if hasattr(camera_config, "model_dump"):
+        event["camera_meta"] = camera_config.model_dump(mode="json")
+    elif isinstance(camera_config, dict):
+        event["camera_meta"] = camera_config
+    else:
+        event["camera_meta"] = None
+
+    return event
+
+
 @router.get("/events", response_model=list[EventResponse])
-def events(params: EventsQueryParams = Depends()):
+def events(request: Request, params: EventsQueryParams = Depends()):
     camera = params.camera
     cameras = params.cameras
 
@@ -308,6 +327,8 @@ def events(params: EventsQueryParams = Depends()):
     else:
         order_by = Event.start_time.desc()
 
+    camera_configs = request.app.frigate_config.cameras
+
     events = (
         Event.select(*selected_columns)
         .where(reduce(operator.and_, clauses))
@@ -317,15 +338,18 @@ def events(params: EventsQueryParams = Depends()):
         .iterator()
     )
 
-    return JSONResponse(content=list(events))
+    enriched_events = [_attach_camera_meta(event, camera_configs) for event in events]
+
+    return JSONResponse(content=enriched_events)
 
 
 @router.get("/events/explore", response_model=list[EventResponse])
-def events_explore(limit: int = 10):
+def events_explore(request: Request, limit: int = 10):
     # get distinct labels for all events
     distinct_labels = Event.select(Event.label).distinct().order_by(Event.label)
 
     label_counts = {}
+    camera_configs = request.app.frigate_config.cameras
 
     def event_generator():
         for label_obj in distinct_labels.iterator():
@@ -381,7 +405,7 @@ def events_explore(limit: int = 10):
                 },
                 "event_count": label_counts[event.label],
             }
-            yield processed_event
+            yield _attach_camera_meta(processed_event, camera_configs)
 
     # convert iterator to list and sort
     processed_events = sorted(
@@ -394,7 +418,7 @@ def events_explore(limit: int = 10):
 
 
 @router.get("/event_ids", response_model=list[EventResponse])
-def event_ids(ids: str):
+def event_ids(request: Request, ids: str):
     ids = ids.split(",")
 
     if not ids:
@@ -404,8 +428,12 @@ def event_ids(ids: str):
         )
 
     try:
+        camera_configs = request.app.frigate_config.cameras
         events = Event.select().where(Event.id << ids).dicts().iterator()
-        return JSONResponse(list(events))
+        enriched_events = [
+            _attach_camera_meta(event, camera_configs) for event in events
+        ]
+        return JSONResponse(enriched_events)
     except Exception:
         return JSONResponse(
             content=({"success": False, "message": "Events not found"}), status_code=400
@@ -462,6 +490,7 @@ def events_search(request: Request, params: EventsSearchQueryParams = Depends())
         )
 
     context: EmbeddingsContext = request.app.embeddings
+    camera_configs = request.app.frigate_config.cameras
 
     selected_columns = [
         Event.id,
@@ -703,7 +732,7 @@ def events_search(request: Request, params: EventsSearchQueryParams = Depends())
             processed_event["search_distance"] = search_results[event["id"]]["distance"]
             processed_event["search_source"] = search_results[event["id"]]["source"]
 
-        processed_events.append(processed_event)
+        processed_events.append(_attach_camera_meta(processed_event, camera_configs))
 
     if (sort is None or sort == "relevance") and search_results:
         processed_events.sort(key=lambda x: x.get("search_distance", float("inf")))
@@ -786,11 +815,14 @@ def events_summary(params: EventsSummaryQueryParams = Depends()):
 
 
 @router.get("/events/{event_id}", response_model=EventResponse)
-def event(event_id: str):
+def event(request: Request, event_id: str):
     try:
-        return model_to_dict(Event.get(Event.id == event_id))
+        event_dict = model_to_dict(Event.get(Event.id == event_id))
     except DoesNotExist:
         return JSONResponse(content="Event not found", status_code=404)
+
+    camera_configs = request.app.frigate_config.cameras
+    return _attach_camera_meta(event_dict, camera_configs)
 
 
 @router.post(
