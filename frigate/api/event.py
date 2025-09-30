@@ -17,6 +17,7 @@ from peewee import JOIN, DoesNotExist, fn, operator
 from playhouse.shortcuts import model_to_dict
 
 from frigate.api.auth import require_role
+from frigate.api.utils import inject_camera_meta
 from frigate.api.defs.query.events_query_parameters import (
     DEFAULT_TIME_RANGE,
     EventsQueryParams,
@@ -56,7 +57,7 @@ router = APIRouter(tags=[Tags.events])
 
 
 @router.get("/events", response_model=list[EventResponse])
-def events(params: EventsQueryParams = Depends()):
+def events(request: Request, params: EventsQueryParams = Depends()):
     camera = params.camera
     cameras = params.cameras
 
@@ -323,11 +324,14 @@ def events(params: EventsQueryParams = Depends()):
         .iterator()
     )
 
-    return JSONResponse(content=list(events))
+    event_list = list(events)
+    inject_camera_meta(event_list, request.app.frigate_config)
+
+    return JSONResponse(content=event_list)
 
 
 @router.get("/events/explore", response_model=list[EventResponse])
-def events_explore(limit: int = 10):
+def events_explore(request: Request, limit: int = 10):
     # get distinct labels for all events
     distinct_labels = Event.select(Event.label).distinct().order_by(Event.label)
 
@@ -395,6 +399,8 @@ def events_explore(limit: int = 10):
         key=lambda x: (x["event_count"], x["start_time"]),
         reverse=True,
     )
+
+    inject_camera_meta(processed_events, request.app.frigate_config)
 
     return JSONResponse(content=processed_events)
 
