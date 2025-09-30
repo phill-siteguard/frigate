@@ -31,6 +31,7 @@ from frigate.embeddings import EmbeddingsContext
 from frigate.ptz.onvif import OnvifController
 from frigate.stats.emitter import StatsEmitter
 from frigate.storage import StorageMaintainer
+from frigate.api.utils import inject_camera_meta
 
 logger = logging.getLogger(__name__)
 
@@ -128,37 +129,7 @@ def create_fastapi_app(
             )
             return response
 
-        injected = False
-        found_camera = False
-
-        def inject_meta(obj):
-            nonlocal injected, found_camera
-            if isinstance(obj, dict):
-                if "camera" in obj:
-                    found_camera = True
-                    if "camera_meta" not in obj:
-                        camera_name = obj.get("camera")
-                        meta = {}
-                        try:
-                            camera_config = request.app.frigate_config.cameras.get(
-                                camera_name
-                            )
-                            if (
-                                camera_config is not None
-                                and getattr(camera_config, "meta", None) is not None
-                            ):
-                                meta = camera_config.meta or {}
-                        except Exception:
-                            meta = {}
-                        obj["camera_meta"] = meta
-                        injected = True
-                for val in obj.values():
-                    inject_meta(val)
-            elif isinstance(obj, list):
-                for item in obj:
-                    inject_meta(item)
-
-        inject_meta(data)
+        injected, found_camera = inject_camera_meta(data, request.app.frigate_config)
         if not injected:
             if found_camera:
                 logger.debug(
