@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -19,12 +19,19 @@ from frigate.util.object import calculate_region
 from ..types import DataProcessorMetrics
 from .api import RealTimeProcessorApi
 
+logger = logging.getLogger(__name__)
+
 try:
     from tflite_runtime.interpreter import Interpreter
 except ModuleNotFoundError:
-    from tensorflow.lite.python.interpreter import Interpreter
-
-logger = logging.getLogger(__name__)
+    try:
+        from tensorflow.lite.python.interpreter import Interpreter
+    except ModuleNotFoundError:
+        Interpreter = None  # type: ignore[assignment]
+        logger.warning(
+            "Bird classifier disabled because tflite_runtime and TensorFlow Lite "
+            "dependencies are unavailable."
+        )
 
 
 class BirdRealTimeProcessor(RealTimeProcessorApi):
@@ -35,12 +42,15 @@ class BirdRealTimeProcessor(RealTimeProcessorApi):
         metrics: DataProcessorMetrics,
     ):
         super().__init__(config, metrics)
-        self.interpreter: Interpreter = None
+        self.interpreter: Optional[Any] = None
         self.sub_label_publisher = sub_label_publisher
         self.tensor_input_details: dict[str, Any] = None
         self.tensor_output_details: dict[str, Any] = None
         self.detected_birds: dict[str, float] = {}
         self.labelmap: dict[int, str] = {}
+
+        if Interpreter is None:
+            return
 
         download_path = os.path.join(MODEL_CACHE_DIR, "bird")
         self.model_files = {
@@ -79,6 +89,9 @@ class BirdRealTimeProcessor(RealTimeProcessorApi):
 
     @redirect_output_to_logger(logger, logging.DEBUG)
     def __build_detector(self) -> None:
+        if Interpreter is None:
+            return
+
         self.interpreter = Interpreter(
             model_path=os.path.join(MODEL_CACHE_DIR, "bird/bird.tflite"),
             num_threads=2,
