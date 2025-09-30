@@ -749,6 +749,8 @@ def events_search(request: Request, params: EventsSearchQueryParams = Depends())
     # Limit the number of events returned
     processed_events = processed_events[:limit]
 
+    inject_camera_meta(processed_events, request.app.frigate_config)
+
     return JSONResponse(content=processed_events)
 
 
