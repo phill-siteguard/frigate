@@ -21,6 +21,7 @@ class EventResponse(BaseModel):
     detector_type: Optional[str]
     model_type: Optional[str]
     data: dict[str, Any]
+    camera_meta: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(protected_namespaces=())
 

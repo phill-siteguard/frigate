@@ -2,6 +2,7 @@
 
 import logging
 import os
+from typing import Any, Optional
 
 import numpy as np
 
@@ -13,12 +14,19 @@ from ...config import FaceRecognitionConfig
 from .base_embedding import BaseEmbedding
 from .runner import ONNXModelRunner
 
+logger = logging.getLogger(__name__)
+
 try:
     from tflite_runtime.interpreter import Interpreter
 except ModuleNotFoundError:
-    from tensorflow.lite.python.interpreter import Interpreter
-
-logger = logging.getLogger(__name__)
+    try:
+        from tensorflow.lite.python.interpreter import Interpreter
+    except ModuleNotFoundError:
+        Interpreter = None  # type: ignore[assignment]
+        logger.warning(
+            "FaceNet embedding disabled because tflite_runtime and TensorFlow Lite "
+            "dependencies are unavailable."
+        )
 
 ARCFACE_INPUT_SIZE = 112
 FACENET_INPUT_SIZE = 160
@@ -36,7 +44,13 @@ class FaceNetEmbedding(BaseEmbedding):
         self.download_path = os.path.join(MODEL_CACHE_DIR, self.model_name)
         self.tokenizer = None
         self.feature_extractor = None
-        self.runner = None
+        self.runner: Optional[Any] = None
+        self.available = Interpreter is not None
+
+        if not self.available:
+            self.downloader = None
+            return
+
         files_names = list(self.download_urls.keys())
 
         if not all(
@@ -57,6 +71,9 @@ class FaceNetEmbedding(BaseEmbedding):
 
     @redirect_output_to_logger(logger, logging.DEBUG)
     def _load_model_and_utils(self):
+        if not self.available:
+            return
+
         if self.runner is None:
             if self.downloader:
                 self.downloader.wait_for_download()
@@ -104,7 +121,14 @@ class FaceNetEmbedding(BaseEmbedding):
         return frame
 
     def __call__(self, inputs):
+        if not self.available:
+            return np.zeros((1, 1), dtype=np.float32)
+
         self._load_model_and_utils()
+
+        if self.runner is None:
+            return np.zeros((1, 1), dtype=np.float32)
+
         processed = self._preprocess_inputs(inputs)
         self.runner.set_tensor(self.tensor_input_details[0]["index"], processed)
         self.runner.invoke()

@@ -29,6 +29,7 @@ class BaseTestHttp(unittest.TestCase):
 
         self.minimal_config = {
             "mqtt": {"host": "mqtt"},
+            "detectors": {"onnx": {"type": "onnx"}},
             "cameras": {
                 "front_door": {
                     "ffmpeg": {
