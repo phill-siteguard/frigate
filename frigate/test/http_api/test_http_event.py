@@ -9,6 +9,10 @@ from frigate.test.http_api.base_http_test import BaseTestHttp
 class TestHttpApp(BaseTestHttp):
     def setUp(self):
         super().setUp([Event, Recordings, ReviewSegment])
+        self.camera_serial_number = "FD1234567890"
+        self.minimal_config["cameras"]["front_door"]["name"] = (
+            self.camera_serial_number
+        )
         self.minimal_config["cameras"]["front_door"]["ffmpeg"]["inputs"][0]["roles"] = [
             "detect",
             "audio",
@@ -107,6 +111,7 @@ class TestHttpApp(BaseTestHttp):
             )
 
             assert event["camera_meta"] == expected_meta
+            assert event["camera_meta"]["name"] == self.camera_serial_number
             assert event["camera_meta"]["ffmpeg"]["inputs"][0]["roles"] == [
                 "record",
                 "detect",
@@ -126,6 +131,7 @@ class TestHttpApp(BaseTestHttp):
             response = client.get("/events/explore").json()
             assert response
             event = response[0]
+            assert event["camera_meta"]["name"] == self.camera_serial_number
             assert event["camera_meta"]["ffmpeg"]["inputs"][0]["roles"] == [
                 "record",
                 "detect",
@@ -141,6 +147,7 @@ class TestHttpApp(BaseTestHttp):
             response = client.get("/event_ids", params={"ids": event_id}).json()
             assert response
             event = response[0]
+            assert event["camera_meta"]["name"] == self.camera_serial_number
             assert event["camera_meta"]["record"]["alerts"]["retain"]["days"] == 2
 
     def test_event_detail_includes_camera_meta(self):
@@ -150,6 +157,7 @@ class TestHttpApp(BaseTestHttp):
             super().insert_mock_event(event_id)
 
             response = client.get(f"/events/{event_id}").json()
+            assert response["camera_meta"]["name"] == self.camera_serial_number
             assert response["camera_meta"]["ffmpeg"]["inputs"][0]["roles"] == [
                 "record",
                 "detect",
