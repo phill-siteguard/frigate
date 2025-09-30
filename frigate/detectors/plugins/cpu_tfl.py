@@ -9,13 +9,19 @@ from frigate.log import redirect_output_to_logger
 
 from ..detector_utils import tflite_detect_raw, tflite_init
 
+logger = logging.getLogger(__name__)
+
 try:
     from tflite_runtime.interpreter import Interpreter
 except ModuleNotFoundError:
-    from tensorflow.lite.python.interpreter import Interpreter
-
-
-logger = logging.getLogger(__name__)
+    try:
+        from tensorflow.lite.python.interpreter import Interpreter
+    except ModuleNotFoundError:
+        Interpreter = None  # type: ignore[assignment]
+        logger.warning(
+            "CPU TFLite detector disabled because tflite_runtime and TensorFlow Lite "
+            "dependencies are unavailable."
+        )
 
 DETECTOR_KEY = "cpu"
 
@@ -30,6 +36,11 @@ class CpuTfl(DetectionApi):
 
     @redirect_output_to_logger(logger, logging.DEBUG)
     def __init__(self, detector_config: CpuDetectorConfig):
+        if Interpreter is None:
+            raise RuntimeError(
+                "CPU detector cannot be initialized without TFLite runtime dependencies."
+            )
+
         interpreter = Interpreter(
             model_path=detector_config.model.path,
             num_threads=detector_config.num_threads or 3,

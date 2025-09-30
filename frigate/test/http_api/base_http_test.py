@@ -29,6 +29,8 @@ class BaseTestHttp(unittest.TestCase):
 
         self.minimal_config = {
             "mqtt": {"host": "mqtt"},
+            "detectors": {"onnx": {"type": "onnx"}},
+            "model": {},
             "cameras": {
                 "front_door": {
                     "ffmpeg": {
@@ -44,6 +46,9 @@ class BaseTestHttp(unittest.TestCase):
                 }
             },
         }
+        self.minimal_config["model"]["labelmap_path"] = os.path.join(
+            os.getcwd(), "labelmap.txt"
+        )
         self.test_stats = {
             "camera_fps": 5.0,
             "process_fps": 5.0,
