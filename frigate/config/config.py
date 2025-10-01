@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -26,6 +27,7 @@ from frigate.plus import PlusApi
 from frigate.util.builtin import (
     deep_merge,
     get_ffmpeg_arg_list,
+    update_yaml_file_bulk,
 )
 from frigate.util.config import (
     StreamInfoRetriever,
@@ -76,7 +78,15 @@ logger = logging.getLogger(__name__)
 
 yaml = YAML()
 
-DEFAULT_CONFIG = """
+
+def generate_instance_id() -> str:
+    """Generate a unique identifier for a Frigate instance."""
+
+    return str(uuid.uuid4())
+
+
+DEFAULT_CONFIG_TEMPLATE = """instance_id: {instance_id}
+
 mqtt:
   enabled: False
 
@@ -93,6 +103,12 @@ cameras:
       width: 1280
       height: 720
 """
+
+
+def generate_default_config() -> str:
+    """Return a default configuration string with a unique instance id."""
+
+    return DEFAULT_CONFIG_TEMPLATE.format(instance_id=generate_instance_id())
 
 DEFAULT_DETECTORS = {"cpu": {"type": "cpu"}}
 DEFAULT_DETECT_DIMENSIONS = {"width": 1280, "height": 720}
@@ -309,6 +325,10 @@ def verify_lpr_and_face(
 
 class FrigateConfig(FrigateBaseModel):
     version: Optional[str] = Field(default=None, title="Current config version.")
+    instance_id: str = Field(
+        default_factory=generate_instance_id,
+        title="Unique identifier for this Frigate instance.",
+    )
     safe_mode: bool = Field(
         default=False, title="If Frigate should be started in safe mode."
     )
@@ -746,18 +766,43 @@ class FrigateConfig(FrigateBaseModel):
             migrate_frigate_config(config_path)
 
         # Finally, load the resulting configuration file.
+        config_contents: str = ""
         with open(config_path, "a+" if new_config else "r") as f:
             # Only write the default config if the opened file is non-empty. This can happen as
             # a race condition. It's extremely unlikely, but eh. Might as well check it.
             if new_config and f.tell() == 0:
-                f.write(DEFAULT_CONFIG)
+                f.write(generate_default_config())
                 logger.info(
                     "Created default config file, see the getting started docs \
                     for configuration https://docs.frigate.video/guides/getting_started"
                 )
 
             f.seek(0)
-            return FrigateConfig.parse(f, **kwargs)
+            config_contents = f.read()
+
+        config_source = config_contents if config_contents.strip() else "{}"
+        config_obj = FrigateConfig.parse(config_source, **kwargs)
+
+        if not new_config:
+            try:
+                raw_config = yaml.load(config_contents) if config_contents else {}
+            except Exception:  # pragma: no cover - defensive, yaml should not raise here
+                raw_config = {}
+
+            if not isinstance(raw_config, dict):
+                raw_config = {}
+
+            instance_id_in_file = raw_config.get("instance_id")
+            if not instance_id_in_file:
+                update_yaml_file_bulk(
+                    config_path, {"instance_id": config_obj.instance_id}
+                )
+                logger.info(
+                    "Persisted generated instance_id '%s' to configuration.",
+                    config_obj.instance_id,
+                )
+
+        return config_obj
 
     @classmethod
     def parse(cls, config, *, is_json=None, safe_load=False, **context):
