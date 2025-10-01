@@ -784,16 +784,23 @@ class FrigateConfig(FrigateBaseModel):
         config_obj = FrigateConfig.parse(config_source, **kwargs)
 
         if not new_config:
-            try:
-                raw_config = yaml.load(config_contents) if config_contents else {}
-            except Exception:  # pragma: no cover - defensive, yaml should not raise here
-                raw_config = {}
+            raw_config: Optional[Dict[str, Any]] = None
+            if config_contents:
+                try:
+                    raw_config = yaml.load(config_contents)
+                except Exception:  # pragma: no cover - defensive, yaml should not raise here
+                    logger.exception(
+                        "Unable to reload configuration for instance_id persistence"
+                    )
 
-            if not isinstance(raw_config, dict):
-                raw_config = {}
+            if raw_config is not None and not isinstance(raw_config, dict):
+                logger.error(
+                    "Unexpected configuration type '%s' while ensuring instance_id",
+                    type(raw_config).__name__,
+                )
+                raw_config = None
 
-            instance_id_in_file = raw_config.get("instance_id")
-            if not instance_id_in_file:
+            if raw_config is not None and not raw_config.get("instance_id"):
                 update_yaml_file_bulk(
                     config_path, {"instance_id": config_obj.instance_id}
                 )
