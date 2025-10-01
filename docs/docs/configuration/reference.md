@@ -12,6 +12,9 @@ It is not recommended to copy this full configuration file. Only specify values 
 :::
 
 ```yaml
+# Optional: Unique identifier for this Frigate instance (default: automatically generated)
+instance_id: 00000000-0000-0000-0000-000000000000
+
 mqtt:
   # Optional: Enable mqtt server (default: shown below)
   enabled: True
