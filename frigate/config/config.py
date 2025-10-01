@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -74,7 +75,15 @@ logger = logging.getLogger(__name__)
 
 yaml = YAML()
 
-DEFAULT_CONFIG = """
+
+def generate_instance_id() -> str:
+    """Generate a unique identifier for a Frigate instance."""
+
+    return str(uuid.uuid4())
+
+
+DEFAULT_CONFIG_TEMPLATE = """instance_id: {instance_id}
+
 mqtt:
   enabled: False
 
@@ -91,6 +100,12 @@ cameras:
       width: 1280
       height: 720
 """
+
+
+def generate_default_config() -> str:
+    """Return a default configuration string with a unique instance id."""
+
+    return DEFAULT_CONFIG_TEMPLATE.format(instance_id=generate_instance_id())
 
 DEFAULT_DETECTORS = {"cpu": {"type": "cpu"}}
 DEFAULT_DETECT_DIMENSIONS = {"width": 1280, "height": 720}
@@ -334,6 +349,13 @@ def verify_lpr_and_face(
 
 class FrigateConfig(FrigateBaseModel):
     version: Optional[str] = Field(default=None, title="Current config version.")
+    instance_id: str = Field(
+        default_factory=generate_instance_id,
+        title="Unique identifier for this Frigate instance.",
+    )
+    safe_mode: bool = Field(
+        default=False, title="If Frigate should be started in safe mode."
+    )
 
     # Fields that install global state should be defined first, so that their validators run first.
     environment_vars: EnvVars = Field(
@@ -722,18 +744,18 @@ class FrigateConfig(FrigateBaseModel):
         new_config = False
         if not os.path.isfile(config_path):
             logger.info("No config file found, saving default config")
-            config_path = config_path
             new_config = True
         else:
             # Check if the config file needs to be migrated.
             migrate_frigate_config(config_path)
 
         # Finally, load the resulting configuration file.
+        config_contents: str = ""
         with open(config_path, "a+" if new_config else "r") as f:
             # Only write the default config if the opened file is non-empty. This can happen as
             # a race condition. It's extremely unlikely, but eh. Might as well check it.
             if new_config and f.tell() == 0:
-                f.write(DEFAULT_CONFIG)
+                f.write(generate_default_config())
                 logger.info(
                     "Created default config file, see the getting started docs \
                     for configuration https://docs.frigate.video/guides/getting_started"
